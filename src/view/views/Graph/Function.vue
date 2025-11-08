@@ -49,6 +49,7 @@ function pushFunc(focus = true) {
                     const latex = obj.field.latex()
                     manager.editExpr(i, latex)
                     console.log(latex)
+                    console.log(JSON.stringify(Expression.parse(latex), null, 2))
                 },
                 enter: function () {
                     if (funcs.indexOf(obj) === funcs.length - 1) pushFunc()

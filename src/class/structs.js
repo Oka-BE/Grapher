@@ -70,8 +70,8 @@ export class FlatComputation {
 export class Equation {
     static parse(latex) {
         const equalIndex = latex.indexOf('=')
-        const lhs = parseExpression(latex.slice(0, equalIndex))
-        const rhs = parseExpression(latex.slice(equalIndex + 1))
+        const lhs = Expression.parse(latex.slice(0, equalIndex))
+        const rhs = Expression.parse(latex.slice(equalIndex + 1))
         if (lhs === null || rhs === null) {
             return null
         }
@@ -235,10 +235,42 @@ export class Equation {
 }
 
 export class Expression {
+    static parse(arg) {
+        // return parseExpression(latex)
+        let tokens
+        if (Array.isArray(arg)) {
+            tokens = arg
+        } else {
+            tokens = Tokenizer.tokenize(arg)
+        }
+        if (tokens === null || tokens.length === 0) {
+            return null
+        }
+        tokens.push({ type: 'OP', value: '+' })
+        const items = []
+        let braceCount = 0
+        let lastSplit = 0
+        for (let i = 0; i < tokens.length; i++) {
+            if (tokens[i].value === '{' || tokens[i].value === '(') {
+                braceCount++
+            } else if (tokens[i].value === '}' || tokens[i].value === ')') {
+                braceCount--
+            }
+            if ((tokens[i].value === '+' || tokens[i].value === '-') && braceCount === 0 && i > 0) {
+                const item = Item.parse(tokens.slice(lastSplit, i))
+                if (item === null) {
+                    return null
+                }
+                items.push(item)
+                lastSplit = i
+            }
+        }
+        return new Expression(items)
+    }
+
     items = []
     // breakPoints = []
     instruction = null
-
     constructor(v) {
         if (Array.isArray(v)) {
             this.items = v
@@ -248,9 +280,6 @@ export class Expression {
                 this.items = expr.items
             }
         }
-    }
-    static parse(latex) {
-        return parseExpression(latex)
     }
     latex() {
         let latex = ''
@@ -354,6 +383,61 @@ export class Expression {
 }
 
 export class Item {
+    static parse(tokens) {
+        if (tokens.length === 0) {
+            return null
+        }
+        const parser = [
+            Fraction.parse,
+            Exponent.parse,
+            Ln.parse,
+            Lg.parse,
+            Log.parse,
+            Sin.parse,
+            Arcsin.parse,
+            Cos.parse,
+            Arccos.parse,
+            Tan.parse,
+            Arctan.parse,
+            Csc.parse,
+            Arccsc.parse,
+            Sec.parse,
+            Arcsec.parse,
+            Cot.parse,
+            Arccot.parse,
+            Variable.parse,
+            Constant.parse,
+        ]
+        const positive = tokens[0].value !== '-'
+        let i = tokens[0].value === '-' || tokens[0].value === '+' ? 1 : 0
+        const part = []
+        while (i < tokens.length) {
+            let found = false
+            for (let j = tokens.length; j > i; j--) {
+                const subtokens = tokens.slice(i, j)
+                for (let k = 0; k < parser.length; k++) {
+                    const res = parser[k](subtokens)
+                    if (res !== null) {
+                        part.push(res)
+                        found = true
+                        i = j
+                        break
+                    }
+                }
+                if (found) {
+                    break
+                }
+            }
+            if (!found) {
+                return null
+            }
+        }
+        if (part.length === 0 || i < tokens.length) {
+            return null
+        }
+        return new Item(part, positive)
+    }
+
     positive = true
     part = []
     constructor(part = [], positive = true) {
@@ -431,6 +515,30 @@ export class Item {
 }
 
 export class Fraction {
+    static parse(tokens) {
+        if (tokens.length === 0 || tokens[0].value !== '\\frac') {
+            return null
+        }
+        let braceCount = 0
+        for (let i = 1; i < tokens.length; i++) {
+            if (tokens[i].value === '{') {
+                braceCount++
+            } else if (tokens[i].value === '}') {
+                braceCount--
+                if (braceCount === 0) {
+                    const numeratorTokens = tokens.slice(2, i)
+                    const denominatorTokens = tokens.slice(i + 2, tokens.length - 1)
+                    const parsedNumerator = Expression.parse(numeratorTokens)
+                    const parsedDenominator = Expression.parse(denominatorTokens)
+                    if (!parsedNumerator || !parsedDenominator) {
+                        return null
+                    }
+                    return new Fraction(parsedNumerator, parsedDenominator)
+                }
+            }
+        }
+    }
+
     numerator = null
     denominator = null
     constructor(numerator = 1, denominator = 1) {
@@ -489,22 +597,33 @@ export class Fraction {
 }
 
 export class Exponent {
+    static parse(tokens) {
+        let braceCount = 0
+        for (let i = 0; i < tokens.length; i++) {
+            if (tokens[i].value === '{' || tokens[i].value === '(') {
+                braceCount++
+            } else if (tokens[i].value === '}' || tokens[i].value === ')') {
+                braceCount--
+            }
+            if (tokens[i].value === '^' && i < tokens.length - 1 && braceCount === 0) {
+                const baseTokens = tokens.slice(0, i)
+                const exponentTokens =
+                    tokens[i + 1].value === '{' && tokens[tokens.length - 1].value === '}' ?
+                        tokens.slice(i + 2, tokens.length - 1) :
+                        tokens.slice(i + 1)
+                const parsedBase = Expression.parse(baseTokens)
+                const parsedExponent = Expression.parse(exponentTokens)
+                if (!parsedBase || !parsedExponent) {
+                    return null
+                }
+                return new Exponent(parsedBase, parsedExponent)
+            }
+        }
+        return null
+    }
+
     base
     exponent
-    static parse(latex) {
-        const signIndex = latex.indexOf('^')
-        const baseLatex = latex.slice(0, signIndex)
-        const exponentLatex =
-            signIndex === latex.length - 2 ?
-                latex[signIndex + 1] :
-                latex.slice(signIndex + 1)
-        const parsedBase = Expression.parse(baseLatex)
-        const parsedExponent = Expression.parse(exponentLatex)
-        if (!parsedBase || !parsedExponent) {
-            return null
-        }
-        return new Exponent(parsedBase, parsedExponent)
-    }
     constructor(base, exponent) {
         this.base = base
         this.exponent = exponent
@@ -553,10 +672,10 @@ export class Root {
 }
 
 export class Function {
-    f
+    name
     args
-    constructor(f, args) {
-        this.f = f
+    constructor(name, args = []) {
+        this.name = name
         this.args = args
     }
 }
@@ -604,6 +723,21 @@ export class Bracket extends SimpleFunc {
 }
 
 export class Ln extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\ln') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Ln(parsedArg)
+    }
+
     latex() {
         return `\\ln${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -619,6 +753,21 @@ export class Ln extends SimpleFunc {
 }
 
 export class Lg extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\lg') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Lg(parsedArg)
+    }
+
     latex() {
         return `\\lg${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -634,6 +783,39 @@ export class Lg extends SimpleFunc {
 }
 
 export class Log {
+    static parse(tokens) {
+        if (tokens.length < 3 || tokens[0].value !== '\\log_') {
+            return null
+        }
+        let baseTokens
+        let antilogTokens
+        if (tokens[1].value !== '{') {
+            baseTokens = [tokens[1]]
+            antilogTokens = tokens.slice(2)
+        } else {
+            let braceCount = 1
+            for (let i = 2; i < tokens.length; i++) {
+                if (tokens[i].value === '{') {
+                    braceCount++
+                }
+                else if (tokens[i].value === '}') {
+                    braceCount--
+                    if (braceCount === 0) {
+                        baseTokens = tokens.slice(2, i)
+                        antilogTokens = tokens.slice(i + 1)
+                        break
+                    }
+                }
+            }
+        }
+        const parsedBase = Expression.parse(baseTokens)
+        const parsedAntilog = Expression.parse(antilogTokens)
+        if (!parsedBase || !parsedAntilog) {
+            return null
+        }
+        return new Log(parsedBase, parsedAntilog)
+    }
+
     base
     antilog
     constructor(base = null, antilog = null) {
@@ -672,6 +854,21 @@ export class Log {
 }
 
 export class Sin extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\sin') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Sin(parsedArg)
+    }
+
     latex() {
         return `\\sin${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -687,6 +884,21 @@ export class Sin extends SimpleFunc {
 }
 
 export class Arcsin extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\sin^{-1}' && tokens[0].value !== '\\arcsin') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Arcsin(parsedArg)
+    }
+
     latex() {
         return `\\sin^{-1}${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -702,6 +914,20 @@ export class Arcsin extends SimpleFunc {
 }
 
 export class Cos extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\cos') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Cos(parsedArg)
+    }
     latex() {
         return `\\cos${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -717,6 +943,21 @@ export class Cos extends SimpleFunc {
 }
 
 export class Arccos extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\cos^{-1}' && tokens[0].value !== '\\arccos') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Arccos(parsedArg)
+    }
+
     latex() {
         return `\\cos^{-1}${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -732,6 +973,20 @@ export class Arccos extends SimpleFunc {
 }
 
 export class Tan extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\tan') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Tan(parsedArg)
+    }
     latex() {
         return `\\tan${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -747,6 +1002,20 @@ export class Tan extends SimpleFunc {
 }
 
 export class Arctan extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\tan^{-1}' && tokens[0].value !== '\\arctan') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Arctan(parsedArg)
+    }
     latex() {
         return `\\tan^{-1}${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -762,6 +1031,20 @@ export class Arctan extends SimpleFunc {
 }
 
 export class Csc extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\csc') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Csc(parsedArg)
+    }
     latex() {
         return `\\csc${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -777,6 +1060,21 @@ export class Csc extends SimpleFunc {
 }
 
 export class Arccsc extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\csc^{-1}' && tokens[0].value !== '\\arccsc') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Arccsc(parsedArg)
+    }
+
     latex() {
         return `\\csc^{-1}${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -792,6 +1090,21 @@ export class Arccsc extends SimpleFunc {
 }
 
 export class Sec extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\sec') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Sec(parsedArg)
+    }
+
     latex() {
         return `\\sec${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -807,6 +1120,21 @@ export class Sec extends SimpleFunc {
 }
 
 export class Arcsec extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\sec^{-1}' && tokens[0].value !== '\\arcsec') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Arcsec(parsedArg)
+    }
+
     latex() {
         return `\\sec^{-1}${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -822,6 +1150,21 @@ export class Arcsec extends SimpleFunc {
 }
 
 export class Cot extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\cot') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Cot(parsedArg)
+    }
+
     latex() {
         return `\\cot${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -837,6 +1180,21 @@ export class Cot extends SimpleFunc {
 }
 
 export class Arccot extends SimpleFunc {
+    static parse(tokens) {
+        if (tokens.length < 2 || tokens[0].value !== '\\cot^{-1}' && tokens[0].value !== '\\arccot') {
+            return null
+        }
+        const argTokens =
+            tokens[1].value === '(' && tokens[tokens.length - 1].value === ')' ?
+                tokens.slice(2, tokens.length - 1) :
+                tokens.slice(1)
+        const parsedArg = Expression.parse(argTokens)
+        if (!parsedArg) {
+            return null
+        }
+        return new Arccot(parsedArg)
+    }
+
     latex() {
         return `\\cot^{-1}${this.v instanceof Expression && this.v.items.length > 1 ? `(${this.v.latex()})` : this.v.latex()}`
     }
@@ -852,6 +1210,13 @@ export class Arccot extends SimpleFunc {
 }
 
 export class Variable {
+    static parse(tokens) {
+        if (tokens.length !== 1 || tokens[0].type !== 'VAR') {
+            return null
+        }
+        return new Variable(tokens[0].value)
+    }
+
     name = ''
     v = null
     constructor(name, v = null) {
@@ -889,6 +1254,13 @@ export class Constant {
         pi: 3.1415926535897932384,
         e: 2.718281828459045,
     }
+    static parse(tokens) {
+        if (tokens.length !== 1 || tokens[0].type !== 'NUM') {
+            return null
+        }
+        return new Constant(Number(tokens[0].value))
+    }
+
     v = 0
     constructor(v) {
         this.v = v
@@ -912,33 +1284,97 @@ export class Constant {
 }
 
 
+export const Tokenizer = {
+    tokens: [
+        {
+            type: 'NUM',
+            regex: /^-?\d+(\.?\d+)?/
+        },
+        {
+            type: 'OP',
+            regex: /^[+\-*/^]/
+        },
+        {
+            type: 'BRACE',
+            regex: /^[\(\)\{\}]/
+        },
+        {
+            type: 'SIGN',
+            regex: /^(\\ln|\\lg|\\log_|\\sin\^\{-1\}|\\sin|\\arcsin|\\cos\^\{-1\}|\\cos|\\arccos|\\tan\^\{-1\}|\\tan|\\arctan|\\sec\^\{-1\}|\\sec|\\arcsec|\\csc\^\{-1\}|\\csc|\\arccsc|\\cot\^\{-1\}|\\cot|\\arccot|\\frac)/
+        },
+        {
+            type: 'VAR',
+            regex: /^[a-zA-Z]/
+        },
+    ],
+    tokenize: function (latex, exStr = []) {
+        latex = latex.replace(/\s+/g, '')
+        const tokens = []
+        let i = 0
+        while (i < latex.length) {
+            const rest = latex.slice(i)
+            let foundEx = false
+            for (const e of exStr) {
+                if (rest.startsWith(e)) {
+                    tokens.push({ type: this.tokenType.EX, value: e })
+                    i += e.length
+                    foundEx = true
+                    break
+                }
+            }
+            if (foundEx) {
+                continue
+            }
+            let foundToken = false
+            for (const token of this.tokens) {
+                const match = rest.match(token.regex)
+                if (match) {
+                    tokens.push({ type: token.type, value: match[0] })
+                    i += match[0].length
+                    foundToken = true
+                    break
+                }
+            }
+            if (!foundToken) {
+                return null
+            }
+        }
+        return tokens
+    }
+}
 
 // 测试数据
 const tests = [
     '1+1',
-    '1\\div2+1',
+    '\\frac{1}{2}+1',
     '3.14^2+\\frac{2}{xy^{22}}',
-    'sin(2x^x)+sin^{-1}x',
+    '\\sin(2x^x)+\\sin^{-1}x',
     'x^2+0.8^y',
     'x-y',
-    'sinsinx+sin^{-1}sin^{-1}y'
+    '\\sin\\sinx+\\sin^{-1}\\sin^{-1}y'
 ]
 let testFlag = true
 for (let i = 0; i < tests.length; i++) {
-    const expr = parseExpression(tests[i])
-    if (expr === null) {
+    try {
+        const expr = Expression.parse(tests[i])
+        if (expr === null) {
+            testFlag = false
+            console.log('parse failed for', tests[i])
+            continue
+        }
+        const latex = expr.latex()
+        const restoredExpr = Expression.parse(latex)
+        const restoredLatex = restoredExpr.latex()
+        if (latex !== restoredLatex) {
+            testFlag = false
+            console.log('latex restore failed for', tests[i])
+            console.log('original latex:', latex)
+            console.log('restored latex:', restoredLatex)
+        }
+    } catch(e) {
         testFlag = false
-        console.log('parse failed for', tests[i])
-        continue
-    }
-    const latex = expr.latex()
-    const restoredExpr = parseExpression(latex)
-    const restoredLatex = restoredExpr.latex()
-    if (latex !== restoredLatex) {
-        testFlag = false
-        console.log('latex restore failed for', tests[i])
-        console.log('original latex:', latex)
-        console.log('restored latex:', restoredLatex)
+        console.log('error for', tests[i], e)
+        console.log(e.stack)
     }
 }
 if (testFlag) {
@@ -1756,3 +2192,78 @@ export function parseExpression(latex) {
     expr.substitute({ e: new Constant('e') })
     return expr
 }
+
+export function parseFunction(latex) {
+    const STATES = {
+        START: 0,
+        NAME: 1,
+        ARG_START: 2,
+        ARG: 3,
+        SPLIT: 4,
+        ARG_END: 5,
+    }
+    let state = STATES.START
+    let name
+    const args = []
+    for (let i = 0; i < latex.length; i++) {
+        const char = latex[i]
+        let pass = false
+        switch (state) {
+            case STATES.START: {
+                if (char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z') {
+                    name = char
+                    state = STATES.NAME
+                    pass = true
+                }
+                break
+            }
+            case STATES.NAME: {
+                if (char === '(') {
+                    state = STATES.ARG_START
+                    pass = true
+                }
+                break
+            }
+            case STATES.ARG_START: {
+                if (char >= 'a' && char <= 'z') {
+                    args.push(char)
+                    state = STATES.ARG
+                }
+                break
+            }
+            case STATES.ARG: {
+                if (char === ',') {
+                    state = STATES.SPLIT
+                    pass = true
+                } else if (char === ')') {
+                    state = STATES.ARG_END
+                    pass = true
+                }
+                break
+            }
+            case STATES.SPLIT: {
+                if (char >= 'a' && char <= 'z') {
+                    args.push(char)
+                    state = STATES.ARG
+                    pass = true
+                }
+                break
+            }
+            case STATES.ARG_END: {
+                pass = true
+                break
+            }
+        }
+        if (!pass) {
+            return null
+        }
+    }
+    if (state !== STATES.ARG_END) {
+        return null
+    }
+    return new Function(name, args)
+}
+
+console.log('---')
+console.log(Expression.parse('\\sin^{}'))
+
