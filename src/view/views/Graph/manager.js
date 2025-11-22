@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
-import { Expression, Equation, FlatComputation } from '../../../class/structs.js'
+import { Expression, Equation } from '../../../class/mathStructs.js'
 import graphWorker from './graphWorker.js?worker'
-import { messageType } from './shared.js'
+import { messageType, exprTypes } from './shared.js'
 
 class GraphManager {
     exprs = []
@@ -9,20 +9,117 @@ class GraphManager {
     coordinateAFI = null
     _redrawGraph
     graphAFI = null
-    waitingFinalGraphRedraw = false
     freepanelInitCallbacks = []
     getRect
     getView
     drawInfo = {
         step: () => {
             const rect = this.getRect()
-            return (rect.width + rect.height) / 2 / 10
+            return (rect.width + rect.height) / 2 / 50
+        },
+        pxGap: () => {
+            return 2
+        },
+    }
+    varDefinitions = {}
+    functionDefinitions = {}
+    functionDefRef = {}
+    onWorkerMessage(obj, e) {
+        switch (e.data[0]) {
+            case messageType.returnGraph: {
+                if (e.data[1] === null) {
+                    const rect = this.getRect()
+                    obj.ctx.clearRect(0, 0, rect.width, rect.height)
+                } else {
+                    const [xbuffer, ybuffer] = [e.data[1], e.data[2]]
+                    const xpointData = Array.from(new Float32Array(xbuffer))
+                    const ypointData = Array.from(new Float32Array(ybuffer))
+                    this._redrawGraph(obj, xpointData, ypointData)
+                }
+                obj.workerLocked = false
+                if (obj.workerExtra) {
+                    obj.workerExtra = false
+                    this.redrawGraph(obj)
+                }
+                break
+            }
+            case messageType.shareInfo: {
+                const info = e.data[1]
+
+                if (obj.varDefinition !== null && !obj.varDefConflict) {
+                    if (info.varDefinition === null) {
+                        delete this.varDefinitions[obj.varDefinition.name]
+                        this.redrawGraphs()
+                    } else {
+                        if (obj.varDefinition.name === info.varDefinition.name) {
+                            this.varDefinitions[info.varDefinition.name] = info.varDefinition.v
+                            this.redrawGraphs()
+                        } else {
+                            delete this.varDefinitions[obj.varDefinition.name]
+                            if (this.varDefinitions[info.varDefinition.name] !== undefined) {
+                                // TODO: handle conflict
+                                obj.varDefConflict = true
+                            } else {
+                                this.varDefinitions[info.varDefinition.name] = info.varDefinition.v
+                                this.redrawGraphs()
+                            }
+                        }
+                    }
+                } else {
+                    if (info.varDefinition !== null) {
+                        if (this.varDefinitions[info.varDefinition.name] !== undefined) {
+                            // TODO: handle conflict
+                            obj.varDefConflict = true
+                        } else {
+                            this.varDefinitions[info.varDefinition.name] = info.varDefinition.v
+                            this.redrawGraphs()
+                        }
+                    }
+                }
+
+                if (obj.functionDefinition && !obj.functionDefConflict && !obj.functionDef2WayLink) {
+                    delete this.functionDefinitions[obj.functionDefinition.name]
+                    delete this.functionDefRef[obj.functionDefinition.name]
+                }
+                if (info.functionDefinition) {
+                    obj.functionDefConflict = this.functionDefinitions[info.functionDefinition.name] !== undefined
+                    obj.functionDef2WayLink = false
+                    for (let i = 0; i < info.functionDefinition.usingFunctionNames.length; i++) {
+                        if (this.functionDefRef[info.functionDefinition.usingFunctionNames[i]] && this.functionDefRef[info.functionDefinition.usingFunctionNames[i]].includes(info.functionDefinition.name)) {
+                            obj.functionDef2WayLink = true
+                            break
+                        }
+                    }
+                    if (!obj.functionDefConflict && !obj.functionDef2WayLink) {
+                        this.functionDefinitions[info.functionDefinition.name] = info.functionDefinition.latex
+                        this.functionDefRef[info.functionDefinition.name] = info.functionDefinition.usingFunctionNames
+                    }
+                } else {
+                    obj.functionDefConflict = false
+                    obj.functionDef2WayLink = false
+                }
+
+                if (obj.type === exprTypes.varDefinition || obj.type === exprTypes.functionDefinition || info.type === exprTypes.varDefinition || info.type === exprTypes.functionDefinition) {
+                    this.redrawGraphs()
+                }
+
+
+                obj.type = info.type
+                obj.valid = info.valid
+                obj.extraVars = info.extraVars
+                obj.varDefinition = info.varDefinition
+                obj.functionDefinition = info.functionDefinition
+                break
+            }
         }
     }
     pushExpr(expr, color) {
         const obj = {
+            type: null,
             init: false,
             expr,
+            valid: true,
+            extraVars: [],
             color,
             id: Symbol(),
             cvs: null,
@@ -30,38 +127,37 @@ class GraphManager {
             worker: null,
             workerLocked: false,
             workerExtra: false,
+            varDefinition: null,
+            varDefConflict: false,
+            functionDefinition: null,
+            functionDefConflict: false,
+            functionDef2WayLink: false,
         }
         const worker = new graphWorker()
         worker.onmessage = (e) => {
-            if (e.data[0] === messageType.returnGraph) {
-                if (e.data[1] === null) {
-                    const rect = this.getRect()
-                    obj.ctx.clearRect(0, 0, rect.width, rect.height)
-                } else {
-                    const [xbuffer, ybuffer] = [e.data[1], e.data[2]]
-                    const xpointData = Array.from(new Float64Array(xbuffer))
-                    const ypointData = Array.from(new Float64Array(ybuffer))
-                    this._redrawGraph(obj, xpointData, ypointData)
-                }
-            }
-            obj.workerLocked = false
-            if (obj.workerExtra) {
-                obj.workerExtra = false
-                this.redrawGraph(obj)
-            }
+            this.onWorkerMessage(obj, e)
         }
         obj.worker = worker
         this.exprs.push(obj)
     }
     editExpr(index, latex) {
-        // this.exprs[index].expr = expr
         this.exprs[index].worker.postMessage([messageType.setExpr, latex])
         this.redrawGraph(this.exprs[index])
     }
     removeExpr(index) {
-        // const rect = this.getRect()
-        // this.exprs[index].ctx.clearRect(0, 0, rect.width, rect.height)
         this.exprs[index].worker.terminate()
+        let gobalInfluence = false
+        if (this.exprs[index].varDefinition !== null && !this.exprs[index].varDefConflict) {
+            delete this.varDefinitions[this.exprs[index].varDefinition.name]
+            gobalInfluence = true
+        }
+        if (this.exprs[index].functionDefinition !== null && !this.exprs[index].functionDefConflict) {
+            delete this.functionDefinitions[this.exprs[index].functionDefinition.name]
+            gobalInfluence = true
+        }
+        if (gobalInfluence) {
+            this.redrawGraphs()
+        }
         this.exprs.splice(index, 1)
     }
     freepanelInit() {
@@ -82,52 +178,36 @@ class GraphManager {
         }
     }
     redrawGraph(expr) {
+        if (expr.type === exprTypes.functionDefinition || expr.type === exprTypes.varDefinition) {
+            return
+        }
         if (expr.workerLocked) {
             expr.workerExtra = true
             return
         }
-        
+        expr.workerLocked = true
+
         const view = this.getView()
-        const rect = this.getRect()
 
         const step = this.drawInfo.step() // pixel gap between computed points
-        const iterationCount = Math.floor(step / 6) // times of iterations to refine points
+        const iterationCount = Math.ceil(step / this.drawInfo.pxGap()) // times of iterations to refine points
         const iterationPadding = 20
-        const granularity = 3 // pixel gap between 2 points to find roots
+        const granularity = 4 // pixel gap between 2 points to find roots
 
         const innerStep = step / view.pxPerUnit * view.unit
         const innerGranularity = view.unit / view.pxPerUnit * granularity
-        const innerMaxGap = view.unit / view.pxPerUnit * 0.05
+        const innerMaxGap = view.unit / view.pxPerUnit * 0.5
         const innerIterationPadding = iterationPadding / view.pxPerUnit * view.unit
 
-        expr.workerLocked = true
         expr.worker.postMessage([messageType.computeGraph, [
             view.lowx, view.highx, view.lowy, view.highy,
             innerStep, innerGranularity, innerMaxGap,
             iterationCount, innerIterationPadding,
+            Object.entries(this.varDefinitions),
+            Object.entries(this.functionDefinitions),
         ]])
     }
-    redrawGraphs(startIndex = 0, force = false) {
-        // if (this.waitingFinalGraphRedraw && !force) return
-        // if (this.graphAFI === null || force) {
-        //     this.graphAFI = requestAnimationFrame(() => {
-        //         const startTime = performance.now()
-        //         for (let i = startIndex; i < this.exprs.length; i++) {
-        //             if (performance.now() - startTime > 8) {
-        //                 this.graphAFI = requestAnimationFrame(this.redrawGraphs.bind(this, i, true))
-        //                 return
-        //             }
-        //             this._redrawGraph(i)
-        //         }
-        //         this.graphAFI = null
-        //         if (this.waitingFinalGraphRedraw) {
-        //             this.waitingFinalGraphRedraw = false
-        //             this.redrawGraphs()
-        //         }
-        //     })
-        // } else {
-        //     this.waitingFinalGraphRedraw = true
-        // }
+    redrawGraphs() {
         for (let i = 0; i < this.exprs.length; i++) {
             this.redrawGraph(this.exprs[i])
         }
@@ -141,8 +221,6 @@ class GraphManager {
 const manager = reactive(new GraphManager())
 export default manager
 
-
-const equ = new Equation('x^2+3x-1=3')
 // let time = new Date().getTime()
 // equ.findRoots(-100000, 100000, 0.1, 0.001)
 // console.log(new Date().getTime() - time)
@@ -161,4 +239,3 @@ const equ = new Equation('x^2+3x-1=3')
 // console.log(equ.lhs.flatCompute({ x: 1 }))
 // console.log(JSON.stringify(equ.lhs, null, 2))
 // equ.form()
-// console.log(equ.latex())

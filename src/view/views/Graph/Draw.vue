@@ -1,8 +1,8 @@
 <script setup>
 import { onMounted, ref, nextTick } from 'vue'
-import { Vector2 } from '../../../class/vector'
 import manager from './manager'
-import { Equation, Expression, Item, Variable } from '@/class/structs'
+import { Equation, Expression, Item, Variable } from '@/class/mathStructs'
+import { Vector2 } from '@/class/class'
 
 manager._redrawCoordinate = redrawCoordinate
 manager._redrawGraph = redrawGraph
@@ -145,7 +145,7 @@ function setGraphCtx(i, expr, el) {
 }
 function redrawGraph(expr, xpointData, ypointData) {
     const rect = container.value.getBoundingClientRect()
-    const maxLinkDis = 10 // max distance for 2 points to link
+    const maxLinkDis = manager.drawInfo.pxGap() * 2 // max distance for 2 points to link
     const step = manager.drawInfo.step()
 
     // const lowx = (-Opos.x - step) / pxPerUnit * unit
@@ -203,7 +203,7 @@ function redrawGraph(expr, xpointData, ypointData) {
     //             y = xpointData[i]
     //             py = Opos.y - y / unit * pxPerUnit
     //             ctx.beginPath()
-    //             ctx.arc(px, py, 2, 0, Math.PI * 2)
+    //             ctx.arc(px, py, 3, 0, Math.PI * 2)
     //             // ctx.fillStyle = points[i][j].forx ? '#a11' : '#1a1'
     //             ctx.fill()
     //             if (n === 0) {

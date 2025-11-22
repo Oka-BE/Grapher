@@ -1,6 +1,6 @@
 <script setup>
 import { nextTick, onMounted, reactive, ref } from 'vue'
-import { Equation, Expression, parseExpression } from '@/class/structs'
+import { Equation, Expression } from '@/class/mathStructs'
 import manager from './manager'
 
 const func = ref(null)
@@ -49,7 +49,7 @@ function pushFunc(focus = true) {
                     const latex = obj.field.latex()
                     manager.editExpr(i, latex)
                     console.log(latex)
-                    console.log(JSON.stringify(Expression.parse(latex), null, 2))
+                    // console.log(JSON.stringify(Expression.parse(latex), null, 2))
                 },
                 enter: function () {
                     if (funcs.indexOf(obj) === funcs.length - 1) pushFunc()
