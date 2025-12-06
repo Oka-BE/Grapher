@@ -1,0 +1,12 @@
+* {
+    caret-color: #ddd;
+    color: #ddd;
+    box-sizing: border-box;
+}
+
+/* 当需要在拖拽期间阻止鼠标样式改变时，向 <html> 或 <body> 添加此类 */
+.no-cursor-change,
+.no-cursor-change * {
+    cursor: default !important;
+    user-select: none !important;
+}

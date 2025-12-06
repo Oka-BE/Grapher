@@ -18,10 +18,14 @@ class GraphManager {
             return (rect.width + rect.height) / 2 / 50
         },
         pxGap: () => {
-            return 2
+            return 3
         },
     }
+    /**
+     * name(key) for value
+     */
     varDefinitions = {}
+    // name(key) for latex
     functionDefinitions = {}
     functionDefRef = {}
     onWorkerMessage(obj, e) {
@@ -46,7 +50,7 @@ class GraphManager {
             case messageType.shareInfo: {
                 const info = e.data[1]
 
-                if (obj.varDefinition !== null && !obj.varDefConflict) {
+                if (obj.type === exprTypes.varDefinition && !obj.varDefinition.conflict) {
                     if (info.varDefinition === null) {
                         delete this.varDefinitions[obj.varDefinition.name]
                         this.redrawGraphs()
@@ -57,8 +61,8 @@ class GraphManager {
                         } else {
                             delete this.varDefinitions[obj.varDefinition.name]
                             if (this.varDefinitions[info.varDefinition.name] !== undefined) {
-                                // TODO: handle conflict
-                                obj.varDefConflict = true
+                                // handle conflict
+                                obj.varDefinition.conflict = true
                             } else {
                                 this.varDefinitions[info.varDefinition.name] = info.varDefinition.v
                                 this.redrawGraphs()
@@ -68,8 +72,8 @@ class GraphManager {
                 } else {
                     if (info.varDefinition !== null) {
                         if (this.varDefinitions[info.varDefinition.name] !== undefined) {
-                            // TODO: handle conflict
-                            obj.varDefConflict = true
+                            // handle conflict
+                            obj.varDefinition.conflict = true
                         } else {
                             this.varDefinitions[info.varDefinition.name] = info.varDefinition.v
                             this.redrawGraphs()
@@ -77,44 +81,54 @@ class GraphManager {
                     }
                 }
 
-                if (obj.functionDefinition && !obj.functionDefConflict && !obj.functionDef2WayLink) {
+                if (obj.type === exprTypes.functionDefinition && !obj.functionDefinition.conflict && !obj.functionDefinition.confusingRef) {
                     delete this.functionDefinitions[obj.functionDefinition.name]
                     delete this.functionDefRef[obj.functionDefinition.name]
                 }
                 if (info.functionDefinition) {
-                    obj.functionDefConflict = this.functionDefinitions[info.functionDefinition.name] !== undefined
-                    obj.functionDef2WayLink = false
+                    obj.functionDefinition.conflict = this.functionDefinitions[info.functionDefinition.name] !== undefined
+                    obj.functionDefinition.confusingRef = false
                     for (let i = 0; i < info.functionDefinition.usingFunctionNames.length; i++) {
                         if (this.functionDefRef[info.functionDefinition.usingFunctionNames[i]] && this.functionDefRef[info.functionDefinition.usingFunctionNames[i]].includes(info.functionDefinition.name)) {
-                            obj.functionDef2WayLink = true
+                            obj.functionDefinition.confusingRef = true
                             break
                         }
                     }
-                    if (!obj.functionDefConflict && !obj.functionDef2WayLink) {
+                    if (!obj.functionDefinition.conflict && !obj.functionDefinition.confusingRef) {
                         this.functionDefinitions[info.functionDefinition.name] = info.functionDefinition.latex
                         this.functionDefRef[info.functionDefinition.name] = info.functionDefinition.usingFunctionNames
                     }
                 } else {
-                    obj.functionDefConflict = false
-                    obj.functionDef2WayLink = false
+                    obj.functionDefinition.conflict = false
+                    obj.functionDefinition.confusingRef = false
+                }
+
+                obj.type = info.type
+                obj.valid = info.valid
+                obj.extraVars = info.extraVars
+                if (info.varDefinition) {
+                    obj.varDefinition.name = info.varDefinition.name
+                    obj.varDefinition.v = info.varDefinition.v
+                    obj.varDefinition.handle.min = Math.min(obj.varDefinition.handle.min, info.varDefinition.v)
+                    obj.varDefinition.handle.max = Math.max(obj.varDefinition.handle.max, info.varDefinition.v)
+                }
+                if (info.functionDefinition) {
+                    obj.functionDefinition.name = info.functionDefinition.name
+                    obj.functionDefinition.latex = info.functionDefinition.latex
+                    obj.functionDefinition.usingFunctionNames = info.functionDefinition.usingFunctionNames
                 }
 
                 if (obj.type === exprTypes.varDefinition || obj.type === exprTypes.functionDefinition || info.type === exprTypes.varDefinition || info.type === exprTypes.functionDefinition) {
                     this.redrawGraphs()
                 }
 
-
-                obj.type = info.type
-                obj.valid = info.valid
-                obj.extraVars = info.extraVars
-                obj.varDefinition = info.varDefinition
-                obj.functionDefinition = info.functionDefinition
+                this.redrawGraph(obj)
                 break
             }
         }
     }
     pushExpr(expr, color) {
-        const obj = {
+        const obj = reactive({
             type: null,
             init: false,
             expr,
@@ -127,12 +141,29 @@ class GraphManager {
             worker: null,
             workerLocked: false,
             workerExtra: false,
-            varDefinition: null,
-            varDefConflict: false,
-            functionDefinition: null,
-            functionDefConflict: false,
-            functionDef2WayLink: false,
-        }
+            varDefinition: {
+                name: null,
+                v: 0,
+                handleType: 'handle',
+                handle: {
+                    min: -10,
+                    max: 10,
+                    minInput: '-10',
+                    maxInput: '10',
+                    onAutoSlide: false,
+                    slideDirection: 1,
+                },
+                conflict: false,
+            },
+            functionDefinition: {
+                name: '',
+                latex: '',
+                usingFunctionNames: [],
+                enableDrawing: false,
+                conflict: false,
+                confusingRef: false,
+            },
+        })
         const worker = new graphWorker()
         worker.onmessage = (e) => {
             this.onWorkerMessage(obj, e)
@@ -142,23 +173,55 @@ class GraphManager {
     }
     editExpr(index, latex) {
         this.exprs[index].worker.postMessage([messageType.setExpr, latex])
-        this.redrawGraph(this.exprs[index])
     }
     removeExpr(index) {
         this.exprs[index].worker.terminate()
         let gobalInfluence = false
-        if (this.exprs[index].varDefinition !== null && !this.exprs[index].varDefConflict) {
+        if (this.exprs[index].type === exprTypes.varDefinition && !this.exprs[index].varDefinition.conflict) {
             delete this.varDefinitions[this.exprs[index].varDefinition.name]
             gobalInfluence = true
         }
-        if (this.exprs[index].functionDefinition !== null && !this.exprs[index].functionDefConflict) {
+        if (this.exprs[index].type === exprTypes.functionDefinition && !this.exprs[index].functionDefinition.conflict && !this.exprs[index].functionDefinition.confusingRef) {
             delete this.functionDefinitions[this.exprs[index].functionDefinition.name]
+            delete this.functionDefRef[this.exprs[index].functionDefinition.name]
             gobalInfluence = true
         }
+        this.exprs.splice(index, 1)
+
         if (gobalInfluence) {
             this.redrawGraphs()
+            for (const expr of this.exprs) {
+                let setFuncNotConflict = false
+                let setFuncNotConfusingRef = false
+                // handle other exprs' variable and function conflict
+                if (expr.type === exprTypes.varDefinition && expr.varDefinition.conflict && !this.varDefinitions[expr.varDefinition.name]) {
+                    expr.varDefinition.conflict = false
+                    this.varDefinitions[expr.varDefinition.name] = expr.varDefinition.v
+                } else if (expr.type === exprTypes.functionDefinition) {
+                    const unconflict = !this.functionDefinitions[expr.functionDefinition.name]
+                    expr.functionDefinition.conflict = !unconflict
+                    setFuncNotConflict = unconflict
+                }
+                // handle function confusing reference
+                if (expr.type === exprTypes.functionDefinition) {
+                    let confusing = false
+                    for (const name of expr.functionDefinition.usingFunctionNames) {
+                        if (this.functionDefRef[name] && this.functionDefRef[name].includes(expr.functionDefinition.name)) {
+                            confusing = true
+                            break
+                        }
+                    }
+                    expr.functionDefinition.confusingRef = confusing
+                    setFuncNotConfusingRef = !confusing
+                }
+                console.log(setFuncNotConflict, setFuncNotConfusingRef)
+                // finally handle function
+                if (expr.type === exprTypes.functionDefinition && setFuncNotConflict && setFuncNotConfusingRef) {
+                    this.functionDefinitions[expr.functionDefinition.name] = expr.functionDefinition.latex
+                    this.functionDefRef[expr.functionDefinition.name] = expr.functionDefinition.usingFunctionNames
+                }
+            }
         }
-        this.exprs.splice(index, 1)
     }
     freepanelInit() {
         for (const cb of this.freepanelInitCallbacks) {
@@ -178,7 +241,8 @@ class GraphManager {
         }
     }
     redrawGraph(expr) {
-        if (expr.type === exprTypes.functionDefinition || expr.type === exprTypes.varDefinition) {
+        if (expr.type === exprTypes.functionDefinition && !expr.functionDefinition.enableDrawing || expr.type === exprTypes.varDefinition) {
+            expr.ctx.clearRect(0, 0, this.getRect().width, this.getRect().height)
             return
         }
         if (expr.workerLocked) {
@@ -192,7 +256,7 @@ class GraphManager {
         const step = this.drawInfo.step() // pixel gap between computed points
         const iterationCount = Math.ceil(step / this.drawInfo.pxGap()) // times of iterations to refine points
         const iterationPadding = 20
-        const granularity = 4 // pixel gap between 2 points to find roots
+        const granularity = 3 // pixel gap between 2 points to find roots
 
         const innerStep = step / view.pxPerUnit * view.unit
         const innerGranularity = view.unit / view.pxPerUnit * granularity
@@ -218,8 +282,29 @@ class GraphManager {
     }
 }
 
-const manager = reactive(new GraphManager())
+const manager = new GraphManager()
 export default manager
+
+let timeSpot = Date.now()
+function stepAutoSlide() {
+    const deltaTime = Date.now() - timeSpot
+    timeSpot = Date.now()
+    for (const expr of manager.exprs) {
+        if (expr.type === exprTypes.varDefinition && expr.varDefinition.handle.onAutoSlide) {
+            const deltaValue = expr.varDefinition.handle.slideDirection * (expr.varDefinition.handle.max - expr.varDefinition.handle.min) * deltaTime * 0.0004
+            expr.varDefinition.v = Math.round((expr.varDefinition.v + deltaValue) * 1e3) / 1e3
+            if (expr.varDefinition.v < expr.varDefinition.handle.min || expr.varDefinition.v > expr.varDefinition.handle.max) {
+                expr.varDefinition.v = Math.round((expr.varDefinition.v - 2 * deltaValue) * 1e3) / 1e3
+                expr.varDefinition.handle.slideDirection *= -1
+            }
+            const latex = expr.field.latex()
+            expr.field.latex(latex.slice(0, latex.indexOf('=') + 1) + expr.varDefinition.v)
+        }
+    }
+    requestAnimationFrame(stepAutoSlide)
+}
+stepAutoSlide()
+
 
 // let time = new Date().getTime()
 // equ.findRoots(-100000, 100000, 0.1, 0.001)

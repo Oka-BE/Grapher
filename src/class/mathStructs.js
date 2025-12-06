@@ -7,7 +7,7 @@ export const Tokenizer = {
         },
         {
             type: 'NUM',
-            regex: /^-?\d+(\.?\d+)?/
+            regex: /^(\d+(\.?\d+)?|e|π)/
         },
         {
             type: 'BRACE',
@@ -30,6 +30,7 @@ export const Tokenizer = {
         latex = latex
             .replace(/\s+/g, '')
             .replace(/\\left|\\right/g, '')
+            .replace(/\\pi/g, 'π')
         return latex
     },
     tokenize: function (latex) {
@@ -38,23 +39,25 @@ export const Tokenizer = {
         let i = 0
         while (i < latex.length) {
             const rest = latex.slice(i)
-            let foundToken = false
+            let len = 0
+            let tok
             for (const token of this.tokens) {
                 const match = rest.match(token.regex)
-                if (match) {
-                    tokens.push({ type: token.type, value: match[0] })
-                    i += match[0].length
-                    foundToken = true
-                    break
+                if (match && match[0].length >= len) {
+                    len = match[0].length
+                    tok = { type: token.type, value: match[0] }
                 }
             }
-            if (!foundToken) {
+            if (len === 0) {
                 return null
             }
+            tokens.push(tok)
+            i += len
         }
         return tokens
     }
 }
+
 
 export class Equation {
     static parse(latex) {
@@ -103,8 +106,7 @@ export class Equation {
      */
     allVars() {
         if (this.allVarsCache === null) {
-            this.allVarsCache = [...this.lhs.allVars(), ...this.rhs.allVars()]
-            .reduce((acc, c) => {
+            this.allVarsCache = [...this.lhs.allVars(), ...this.rhs.allVars()].reduce((acc, c) => {
                 if (acc.find(v => v.name === c.name) === undefined) {
                     acc.push(c)
                 }
@@ -123,11 +125,7 @@ export class Equation {
         this.formed = true
     }
     clone() {
-        const cloned = new Equation(this.lhs.clone(), this.rhs.clone())
-        cloned.formed = this.formed
-        cloned.allVarsCache = null
-        cloned._linkComplete = null
-        return cloned
+        return new Equation(this.lhs.clone(), this.rhs.clone())
     }
     /**
      * 隐式地把值代入变量，在计算的时候会把变量识别为Num
@@ -152,38 +150,54 @@ export class Equation {
      * @returns 所有根的数组（从小到大）
      */
     findRoots(min, max, granularity = 0.1, maxGap = 0.0001) {
-        this.form()
-        const vars = this.allVars().filter(v => v.v === null)
+        const vars = this.allVars().filter(v => this.lhs.compiledList[v.name] === undefined)
         if (vars.length !== 1) {
             console.log('size error', vars)
             return null
         }
-        let varName = vars[0].name
+        const varName = vars[0].name
         const roots = []
-        let tempY = this.lhs.compute({ [varName]: min })
-        let lastY
-        if (typeof tempY !== 'number' || isNaN(tempY)) {
-            lastY = null
+        this.lhs.compiledList[varName] = min
+        let y = this.lhs.computeCompiled()
+        let sign
+        if (typeof y !== 'number' || isNaN(y)) {
+            sign = null
+        } else if (y === 0) {
+            roots.push(min)
+            sign = 0
         } else {
-            lastY = tempY
+            sign = y < 0 ? -1 : 1
         }
         for (let v = min; v <= max; v += granularity) {
-            const y = this.lhs.compute({ [varName]: v })
+            this.lhs.compiledList[varName] = v
+            const y = this.lhs.computeCompiled()
             if (typeof y !== 'number' || isNaN(y)) {
-                lastY = null
+                sign = null
                 continue
             }
-            if (lastY !== null) {
-                if (lastY * y <= 0) {
+            if (sign !== null) {
+                if (sign * y === 0) {
+                    if (y === 0) {
+                        roots.push(v)
+                        // console.log('found root in 0 posibility:', v)
+                    }
+                    sign = y < 0 ? -1 : y > 0 ? 1 : 0
+                } else if (sign * y < 0) {
                     let left = v - granularity, right = v
-                    const oLeftValue = lastY
+                    this.lhs.compiledList[varName] = left
+                    const oLeftValue = this.lhs.computeCompiled()
                     const oRightValue = y
                     let leftValue = oLeftValue, rightValue = oRightValue
                     const rising = y > 0
                     while (right - left >= maxGap) {
                         const mid = (left + right) / 2
-                        const y = this.lhs.compute({ [varName]: mid })
-                        if (y < 0) {
+                        this.lhs.compiledList[varName] = mid
+                        const y = this.lhs.computeCompiled()
+                        if (y === 0) {
+                            left = right = mid
+                            leftValue = rightValue = y
+                            break
+                        } else if (y < 0) {
                             if (rising) {
                                 left = mid
                                 leftValue = y
@@ -204,12 +218,14 @@ export class Equation {
                         }
                     }
                     if (Math.abs(leftValue - rightValue) < Math.abs(oLeftValue - oRightValue)) {
+                        // if (!equ.lhs.hasBreakpointIn(left, right)) {
                         roots.push((left + right) / 2)
                     }
                 }
             }
-            lastY = y
+            sign = y < 0 ? -1 : y > 0 ? 1 : 0
         }
+        this.lhs.compiledList[varName] = undefined
         return roots
     }
     linkFunction(funcDefs) {
@@ -240,11 +256,10 @@ export class Equation {
 export class VariableDefinition {
     static parse(arg) {
         const tokens = Array.isArray(arg) ? arg : Tokenizer.tokenize(arg)
-        if (tokens !== null && (tokens.length === 3 || tokens.length === 4) && tokens[0].type === 'CHAR' && tokens[0].value !== 'x' && tokens[0].value !== 'y' && tokens[1].value === '=') {
-            if (tokens.length === 3 && tokens[2].type === 'NUM') {
-                return new VariableDefinition(tokens[0].value, parseFloat(tokens[2].value))
-            } else if (tokens.length === 4 && (tokens[2].value === '-' || tokens[2].value === '+') && tokens[3].type === 'NUM') {
-                return new VariableDefinition(tokens[0].value, parseFloat(tokens[2].value + tokens[3].value))
+        if (tokens !== null && tokens[0].type === 'CHAR' && tokens[1].value === '=') {
+            const num = Num.parse(tokens.slice(2))
+            if (num) {
+                return new VariableDefinition(tokens[0].value, num.v)
             }
         }
         return null
@@ -391,14 +406,15 @@ export class Expression {
                 }
                 items.push(item)
                 lastSplit = i
+                i++
             }
         }
-        const expr = new Expression(items)
-        expr.substitute({ e: Num.map.e })
-        return expr
+        return new Expression(items)
     }
 
     items = []
+    compiled = null
+    compiledList = {}
     constructor(v) {
         if (Array.isArray(v)) {
             this.items = v
@@ -424,6 +440,9 @@ export class Expression {
         }
         return res
     }
+    computeCompiled() {
+        return this.compiled(this.compiledList)
+    }
     /**
      * 获取所有Variable，包括隐式的
      * @returns Variable[]
@@ -446,7 +465,7 @@ export class Expression {
         for (let i = 0; i < this.items.length; i++) {
             this.items[i].hiddenSubstitute(list)
         }
-        this.instruction = null
+        this.substituted = { ...this.substituted, ...list }
     }
     /**
      * 把变量代入具体值
@@ -463,22 +482,22 @@ export class Expression {
         }
         return this.instruction.compute(list)
     }
-    linkFunction(funcDefs) {
-        for (let i = 0; i < this.items.length; i++) {
-            this.items[i].linkFunction(funcDefs)
-        }
-    }
-    dislinkFunction() {
-        for (let i = 0; i < this.items.length; i++) {
-            if (this.items[i].dislinkFunction) this.items[i].dislinkFunction()
-        }
-    }
-    linkComplete() {
-        for (let i = 0; i < this.items.length; i++) {
-            if (!this.items[i].linkComplete()) return false
-        }
-        return true
-    }
+    // linkFunction(funcDefs) {
+    //     for (let i = 0; i < this.items.length; i++) {
+    //         this.items[i].linkFunction(funcDefs)
+    //     }
+    // }
+    // dislinkFunction() {
+    //     for (let i = 0; i < this.items.length; i++) {
+    //         if (this.items[i].dislinkFunction) this.items[i].dislinkFunction()
+    //     }
+    // }
+    // linkComplete() {
+    //     for (let i = 0; i < this.items.length; i++) {
+    //         if (!this.items[i].linkComplete()) return false
+    //     }
+    //     return true
+    // }
     allFunctions() {
         return this.items.reduce((acc, c) => {
             return [...new Set([...acc, ...c.allFunctions()])]
@@ -488,6 +507,16 @@ export class Expression {
         for (let i = 0; i < this.items.length; i++) {
             this.items[i].replaceFunction(funcDefs)
         }
+    }
+    toJsCode() {
+        let code = this.items.reduce((acc, curr) => acc + curr.toJsCode(), '')
+        if (code[0] === '+') {
+            code = code.slice(1)
+        }
+        return code
+    }
+    compile() {
+        this.compiled = new Function('list', `return ${this.toJsCode()}`)
     }
 }
 
@@ -641,8 +670,8 @@ export class Item {
                 const expr = def.expr.clone()
                 const params = {}
                 // console.log(JSON.stringify(this.part[i].params, null, 2))
-                for (let j = 0; j < def.params.length; j++) {
-                    params[def.params[j]] = this.part[i].params[j]
+                for (let i = 0; i < def.params.length; i++) {
+                    params[def.params[i]] = new Bracket(this.part[i].params[i])
                 }
                 expr.substitute(params)
                 // console.log(expr)
@@ -652,6 +681,9 @@ export class Item {
                 this.part[i].replaceFunction(funcDefs)
             }
         }
+    }
+    toJsCode() {
+        return (this.positive ? '+' : '-') + this.part.reduce((acc, curr, i) => acc + (i === 0 ? '' : '*') + curr.toJsCode(), '')
     }
 }
 
@@ -737,6 +769,9 @@ export class Fraction {
         this.numerator.replaceFunction(funcDefs)
         this.denominator.replaceFunction(funcDefs)
     }
+    toJsCode() {
+        return `(${this.numerator.toJsCode()})/(${this.denominator.toJsCode()})`
+    }
 }
 
 export class Exponent {
@@ -748,7 +783,11 @@ export class Exponent {
             } else if (tokens[i].value === '}' || tokens[i].value === ')') {
                 braceCount--
             }
-            if (tokens[i].value === '^' && i < tokens.length - 1 && braceCount === 0) {
+            if (tokens[i].value === '^' && i >= 1 && i < tokens.length - 1 && braceCount === 0) {
+                if ((tokens[0].value === '(' && tokens[i - 1].value === ')' && i >= 3 || i === 1) && (i === tokens.length - 2 || i < tokens.length - 3 && tokens[i + 1].value === '{' && tokens[tokens.length - 1].value === '}')) {
+                } else {
+                    return null
+                }
                 const baseTokens = tokens.slice(0, i)
                 const exponentTokens =
                     tokens[i + 1].value === '{' && tokens[tokens.length - 1].value === '}' ?
@@ -817,6 +856,9 @@ export class Exponent {
     replaceFunction(funcDefs) {
         this.base.replaceFunction(funcDefs)
         this.exponent.replaceFunction(funcDefs)
+    }
+    toJsCode() {
+        return `(${this.base.toJsCode()})**(${this.exponent.toJsCode()})`
     }
 }
 
@@ -972,6 +1014,9 @@ export class Bracket extends SimpleFunc {
     f() {
         return v => v
     }
+    toJsCode() {
+        return `(${this.v.toJsCode()})`
+    }
 }
 
 export class Ln extends SimpleFunc {
@@ -1001,6 +1046,9 @@ export class Ln extends SimpleFunc {
     }
     f() {
         return v => Math.log(v)
+    }
+    toJsCode() {
+        return `Math.log(${this.v.toJsCode()})`
     }
 }
 
@@ -1032,6 +1080,9 @@ export class Lg extends SimpleFunc {
     f() {
         return v => Math.log10(v)
     }
+    toJsCode() {
+        return `Math.log10(${this.v.toJsCode()})`
+    }
 }
 
 export class Log {
@@ -1060,7 +1111,7 @@ export class Log {
                 }
             }
         }
-        if (!baseTokens || !antilogTokens) {
+        if (!Array.isArray(baseTokens) || !Array.isArray(antilogTokens)) {
             return null
         }
         const parsedBase = Expression.parse(baseTokens)
@@ -1085,14 +1136,7 @@ export class Log {
         return Math.log(this.antilog.compute(list)) / Math.log(this.base.compute(list))
     }
     allVars() {
-        const baseVars = this.base.allVars()
-        const antiVars = this.antilog.allVars()
-        for (let i = 0; i < antiVars.length; i++) {
-            if (!baseVars.find(v => v.name === antiVars[i].name)) {
-                baseVars.push(antiVars[i])
-            }
-        }
-        return baseVars
+        return [...new Set([...this.base.allVars(), ...this.antilog.allVars()])]
     }
     clone() {
         return new Log(this.base.clone(), this.antilog.clone())
@@ -1112,10 +1156,6 @@ export class Log {
         this.base.substitute(list)
         this.antilog.substitute(list)
     }
-    hiddenSubstitute(list) {
-        this.base.hiddenSubstitute(list)
-        this.antilog.hiddenSubstitute(list)
-    }
     linkFunction(funcDefs) {
         this.base.linkFunction(funcDefs)
         this.antilog.linkFunction(funcDefs)
@@ -1123,6 +1163,9 @@ export class Log {
     replaceFunction(funcDefs) {
         this.base.replaceFunction(funcDefs)
         this.antilog.replaceFunction(funcDefs)
+    }
+    toJsCode() {
+        return `Math.log(${this.antilog.toJsCode()})/Math.log(${this.base.toJsCode()})`
     }
 }
 
@@ -1154,6 +1197,9 @@ export class Sin extends SimpleFunc {
     f() {
         return v => Math.sin(v)
     }
+    toJsCode() {
+        return `Math.sin(${this.v.toJsCode()})`
+    }
 }
 
 export class Arcsin extends SimpleFunc {
@@ -1184,6 +1230,9 @@ export class Arcsin extends SimpleFunc {
     f() {
         return v => Math.asin(v)
     }
+    toJsCode() {
+        return `Math.asin(${this.v.toJsCode()})`
+    }
 }
 
 export class Cos extends SimpleFunc {
@@ -1212,6 +1261,9 @@ export class Cos extends SimpleFunc {
     }
     f() {
         return v => Math.cos(v)
+    }
+    toJsCode() {
+        return `Math.cos(${this.v.toJsCode()})`
     }
 }
 
@@ -1243,6 +1295,9 @@ export class Arccos extends SimpleFunc {
     f() {
         return v => Math.acos(v)
     }
+    toJsCode() {
+        return `Math.acos(${this.v.toJsCode()})`
+    }
 }
 
 export class Tan extends SimpleFunc {
@@ -1271,6 +1326,9 @@ export class Tan extends SimpleFunc {
     }
     f() {
         return v => Math.tan(v)
+    }
+    toJsCode() {
+        return `Math.tan(${this.v.toJsCode()})`
     }
 }
 
@@ -1301,6 +1359,9 @@ export class Arctan extends SimpleFunc {
     f() {
         return v => Math.atan(v)
     }
+    toJsCode() {
+        return `Math.atan(${this.v.toJsCode()})`
+    }
 }
 
 export class Csc extends SimpleFunc {
@@ -1329,6 +1390,9 @@ export class Csc extends SimpleFunc {
     }
     f() {
         return v => 1 / Math.sin(v)
+    }
+    toJsCode() {
+        return `1 / Math.sin(${this.v.toJsCode()})`
     }
 }
 
@@ -1360,6 +1424,9 @@ export class Arccsc extends SimpleFunc {
     f() {
         return v => Math.asin(1 / v)
     }
+    toJsCode() {
+        return `Math.asin(1 / (${this.v.toJsCode()}))`
+    }
 }
 
 export class Sec extends SimpleFunc {
@@ -1389,6 +1456,9 @@ export class Sec extends SimpleFunc {
     }
     f() {
         return v => 1 / Math.cos(v)
+    }
+    toJsCode() {
+        return `1 / Math.cos(${this.v.toJsCode()})`
     }
 }
 
@@ -1420,6 +1490,9 @@ export class Arcsec extends SimpleFunc {
     f() {
         return v => Math.acos(1 / v)
     }
+    toJsCode() {
+        return `Math.acos(1 / (${this.v.toJsCode()}))`
+    }
 }
 
 export class Cot extends SimpleFunc {
@@ -1450,6 +1523,9 @@ export class Cot extends SimpleFunc {
     f() {
         return v => 1 / Math.tan(v)
     }
+    toJsCode() {
+        return `1 / Math.tan(${this.v.toJsCode()})`
+    }
 }
 
 export class Arccot extends SimpleFunc {
@@ -1479,6 +1555,9 @@ export class Arccot extends SimpleFunc {
     }
     f() {
         return v => Math.atan(1 / v)
+    }
+    toJsCode() {
+        return `Math.atan(1 / (${this.v.toJsCode()}))`
     }
 }
 
@@ -1513,6 +1592,9 @@ export class Variable {
             this.v = list[this.name]
         }
     }
+    toJsCode() {
+        return `list.${this.name}`
+    }
 }
 
 export class Num {
@@ -1521,10 +1603,13 @@ export class Num {
         e: 2.718281828459045,
     }
     static parse(tokens) {
-        if (tokens.length !== 1 || tokens[0].type !== 'NUM') {
-            return null
+        if (tokens.length === 1 && tokens[0].type === 'NUM') {
+            return new Num(tokens[0].value in Num.map ? Num.map[tokens[0].value] : Number(tokens[0].value))
         }
-        return new Num(Number(tokens[0].value))
+        if (tokens.length === 2 && (tokens[0].value === '+'  || tokens[0].value === '-') && tokens[1].type === 'NUM') {
+            return new Num((tokens[0].value === '+' ? 1 : -1) * (tokens[1].value in Num.map ? Num.map[tokens[1].value] : Number(tokens[1].value)))
+        }
+        return null
     }
 
     v = 0
@@ -1543,6 +1628,9 @@ export class Num {
     }
     clone() {
         return new Num(this.v)
+    }
+    toJsCode() {
+        return `${this.v}`
     }
 }
 
@@ -1585,6 +1673,28 @@ if (testFlag) {
 }
 
 
-console.log(JSON.stringify(new VariableDefinition('a=-1'), null, 2))
-console.log(JSON.stringify(Tokenizer.tokenize('a=-1'), null, 2))
-console.log(JSON.stringify(Expression.parse('-1'), null, 2))
+// const expr = new Expression('123+2x^2')
+// expr.compile()
+// console.log(JSON.stringify(expr, null, 2))
+// console.log(expr.toJsCode())
+// expr.compiledList.x = 3
+// console.log(expr.computeCompiled())
+// const equ = new Equation('y-(x)=0')
+// equ.form()
+// equ.lhs.compile()
+// equ.lhs.compiledList.x = 0.3
+// equ.lhs.compiledList.y = 0.3
+// console.log(equ.lhs.computeCompiled())
+// console.time()
+// for (let i = 0; i < 10000000; i++) {
+//     expr.compute({ x: 3 })
+// }
+// console.timeEnd()
+// console.time()
+// expr.compiledList.x = 3
+// for (let i = 0; i < 10000000; i++) {
+//     expr.computeCompiled()
+// }
+// console.timeEnd()
+console.log(Tokenizer.tokenize('\\log_{1.5}'))
+

@@ -94,12 +94,14 @@ function redrawCoordinate() {
     cCtx.font = '12px Arial'
     cCtx.fillStyle = '#aaa'
     cCtx.textBaseline = 'middle'
-    cCtx.textAlign = 'right'
+    cCtx.textAlign = 'left'
     for (let i = Math.ceil(-Opos.y / step); Opos.y + i * step < height; i++) {
         if (i === 0) continue
         if (i % 5 === 0) {
-            const val = (-i * step * unit / pxPerUnit).toFixed(4).replace(/\.?0+$/, '')
-            cCtx.fillText(val, Opos.x - 2, Opos.y + i * step)
+            const v = -i * step * unit / pxPerUnit
+            const str = Math.abs(Math.floor(Math.log10(Math.abs(v)))) < 4 ? v.toFixed(4).replace(/\.?0+$/, '') : `${Math.round(v / 10 ** Math.floor(Math.log10(Math.abs(v))) * 10) / 10}e${Math.floor(Math.log10(Math.abs(v)))}`
+            const width = cCtx.measureText(str).width
+            cCtx.fillText(str, Math.min(Math.max(Opos.x - width - 2, 3), container.value.clientWidth - width - 2), Opos.y + i * step)
         }
     }
     cCtx.textBaseline = 'bottom'
@@ -107,8 +109,10 @@ function redrawCoordinate() {
     for (let i = Math.ceil(-Opos.x / step); Opos.x + i * step < width; i++) {
         if (i === 0) continue
         if (i % 5 === 0) {
-            const val = (i * step * unit / pxPerUnit).toFixed(4).replace(/\.?0+$/, '')
-            cCtx.fillText(val, Opos.x + i * step, Opos.y)
+            const v = i * step * unit / pxPerUnit
+            const str = Math.abs(Math.floor(Math.log10(Math.abs(v)))) < 4 ? v.toFixed(4).replace(/\.?0+$/, '') : `${Math.round(v / 10 ** Math.floor(Math.log10(Math.abs(v))) * 10) / 10}e${Math.floor(Math.log10(Math.abs(v)))}`
+            const width = cCtx.measureText(str).width
+            cCtx.fillText(str, Opos.x + i * step, Math.min(Math.max(Opos.y - 2, 14), container.value.clientHeight - 2))
         }
     }
 
@@ -203,8 +207,8 @@ function redrawGraph(expr, xpointData, ypointData) {
     //             y = xpointData[i]
     //             py = Opos.y - y / unit * pxPerUnit
     //             ctx.beginPath()
-    //             ctx.arc(px, py, 3, 0, Math.PI * 2)
-    //             // ctx.fillStyle = points[i][j].forx ? '#a11' : '#1a1'
+    //             ctx.arc(px, py, 0.6, 0, Math.PI * 2)
+    //             ctx.fillStyle = '#a11'
     //             ctx.fill()
     //             if (n === 0) {
     //                 state = states.readn
@@ -231,8 +235,8 @@ function redrawGraph(expr, xpointData, ypointData) {
     //             const x = ypointData[i]
     //             px = Opos.x + x / unit * pxPerUnit
     //             ctx.beginPath()
-    //             ctx.arc(px, py, 1, 0, Math.PI * 2)
-    //             // ctx.fillStyle = points[i][j].forx ? '#a11' : '#1a1'
+    //             ctx.arc(px, py, 0.3, 0, Math.PI * 2)
+    //             ctx.fillStyle = '#1a1'
     //             ctx.fill()
     //             if (n === 0) {
     //                 state = states.readn

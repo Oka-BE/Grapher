@@ -7,6 +7,11 @@ let equ = null
 let functions = {}
 let fresh = true
 
+let computationCount = 0
+let totalTime = 0
+const printTimeRound = 500
+let startTime
+
 onmessage = (e) => {
     switch (e.data[0]) {
         case messageType.setExpr: {
@@ -24,7 +29,7 @@ onmessage = (e) => {
                     equ = null
                 } else {
                     equ = Equation.parse('y=' + latex)
-                    // console.log(JSON.stringify(equ, null, 2))
+                    console.log(JSON.stringify(equ, null, 2))
                     if (equ !== null) {
                         info.type = exprTypes.expression
                         info.valid = true
@@ -46,7 +51,9 @@ onmessage = (e) => {
                     }
                 } else if (fd !== null) {
                     // console.log(JSON.stringify(fd, null, 2))
-                    equ = null
+                    equ = new Equation('y' + latex.slice(latex.indexOf('=')))
+                    equ.form()
+                    // console.log(JSON.stringify(equ, null, 2))
                     info.type = exprTypes.functionDefinition
                     info.valid = true
                     info.extraVars = fd.extraVars
@@ -86,23 +93,15 @@ onmessage = (e) => {
             highx += step
             lowy -= step
             highy += step
-            // console.log((highx - lowx) / granularity)
-
-            for (const [name, v] of varDefinitions) {
-                equ.hiddenSubstitute({ [name]: v })
-            }
-            const vars = equ.allVars()
-            if (vars.filter(v => v.name !== 'x' && v.name !== 'y' && v.v === null).length > 0) {
-                postMessage([messageType.returnGraph, null])
-                return
-            }
 
             const entries = Object.entries(functions)
             const functionUnchanged = entries.reduce((acc, c) => {
                 return acc && functionDefinitions.find(d => d[1] === c[1].latex)
             }, true) && entries.length === functionDefinitions.length
+            let hasReplacedFunction = false
             if (!functionUnchanged) {
                 equ = originEqu
+                hasReplacedFunction = true
                 const newFunctions = {}
                 for (const [name, fdlatex] of functionDefinitions) {
                     newFunctions[name] = {
@@ -119,26 +118,44 @@ onmessage = (e) => {
             }
             if (fresh) {
                 fresh = false
+                hasReplacedFunction = true
                 equ.replaceFunction(Object.entries(functions).map(f => f[1].definition))
-                // console.log(equ.latex())
+                // console.log(equ.latex(), JSON.stringify(equ, null, 2))
             }
-            // if (!equ.linkComplete()) {
             if (equ.allFunctions().length > 0) {
                 postMessage([messageType.returnGraph, null])
                 return
             }
+            if (hasReplacedFunction) {
+                console.log(equ.lhs.toJsCode())
+                equ.lhs.compile()
+            }
+            // if (!equ.linkComplete()) {
+
+            for (const [name, v] of varDefinitions) {
+                // equ.hiddenSubstitute({ [name]: v })
+                equ.lhs.compiledList[name] = v
+            }
+            const vars = equ.allVars()
+            if (vars.filter(v => v.name !== 'x' && v.name !== 'y' && equ.lhs.compiledList[v.name] === undefined).length > 0) {
+                postMessage([messageType.returnGraph, null])
+                return
+            }
+
 
             /**
              * pointData结构：
              * [n, x, y1...yn, ...]
              */
 
-            console.time()
+            computationCount++
+            startTime = Date.now()
             const pointData4x = []
             if (vars.find(v => v.name === 'y')) {
                 const points4x = []
                 for (let x = lowx; x <= highx; x += step) {
-                    equ.hiddenSubstitute({ x })
+                    // equ.hiddenSubstitute({ x })
+                    equ.lhs.compiledList.x = x
                     const roots = equ.findRoots(lowy, highy, granularity, maxGap)
                     let min = Infinity, max = -Infinity
                     for (let i = 0; i < roots.length; i++) {
@@ -168,7 +185,8 @@ onmessage = (e) => {
                     }
                     for (let j = 0; j < iterationCount; j++) {
                         const x = lowx + i * step + step * (j + 1) / (iterationCount + 1)
-                        equ.hiddenSubstitute({ x })
+                        // equ.hiddenSubstitute({ x })
+                        equ.lhs.compiledList.x = x
                         let roots
                         if (allrangeMode) {
                             roots = equ.findRoots(lowy, highy, granularity, maxGap)
@@ -198,7 +216,8 @@ onmessage = (e) => {
                         }
                     }
                 }
-                equ.hiddenSubstitute({ x: null })
+                // equ.hiddenSubstitute({ x: null })
+                equ.lhs.compiledList.x = undefined
             }
             const xbuffer = new Float32Array(pointData4x).buffer
 
@@ -206,7 +225,8 @@ onmessage = (e) => {
             if (vars.find(v => v.name === 'x')) {
                 const points4y = []
                 for (let y = lowy; y <= highy; y += step) {
-                    equ.hiddenSubstitute({ y })
+                    // equ.hiddenSubstitute({ y })
+                    equ.lhs.compiledList.y = y
                     const roots = equ.findRoots(lowx, highx, granularity, maxGap)
                     let min = Infinity, max = -Infinity
                     for (let i = 0; i < roots.length; i++) {
@@ -234,7 +254,8 @@ onmessage = (e) => {
                     }
                     for (let j = 0; j < iterationCount; j++) {
                         const y = lowy + i * step + step * (j + 1) / (iterationCount + 1)
-                        equ.hiddenSubstitute({ y })
+                        // equ.hiddenSubstitute({ y })
+                        equ.lhs.compiledList.y = y
                         let roots
                         if (allrangeMode) {
                             roots = equ.findRoots(lowx, highx, granularity, maxGap)
@@ -264,14 +285,24 @@ onmessage = (e) => {
                         }
                     }
                 }
-                equ.hiddenSubstitute({ y: null })
+                // equ.hiddenSubstitute({ y: null })
+                equ.lhs.compiledList.y = undefined
             }
             const ybuffer = new Float32Array(pointData4y).buffer
 
-            console.timeEnd()
+            totalTime += Date.now() - startTime
+            if (computationCount % printTimeRound === 0) {
+                computationCount %= printTimeRound
+                console.log(`spend ${totalTime / printTimeRound}ms computing equation:${equ.latex()}`)
+                totalTime = 0
+            }
+
             postMessage([messageType.returnGraph, xbuffer, ybuffer], [xbuffer, ybuffer])
+            // for (const [name, v] of varDefinitions) {
+            //     equ.hiddenSubstitute({ [name]: null })
+            // }
             for (const [name, v] of varDefinitions) {
-                equ.hiddenSubstitute({ [name]: null })
+                equ.lhs.compiledList[name] = undefined
             }
 
             break

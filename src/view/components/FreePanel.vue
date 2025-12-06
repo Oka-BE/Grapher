@@ -141,12 +141,14 @@ function upHandle() {
             </div>
         </div>
         <div @mouseover="overHandle" @mouseout="outHandle" @mousedown="downHandle"
-            class="absolute op-1 bg-#eee transition-opacity" :class="{ 'op-10': isoverHandle || isdraggingHandle }"
+            class="absolute"
             :style="{
                 top: vertical ? `${size + handleWidth / 2 * (ishidden1 ? 0 : ishidden2 ? -2 : -1)}px` : '0',
-                left: vertical ? 0 : `${size + handleWidth / 2 * (ishidden1 ? 0 : ishidden2 ? -2 : -1)}px`,
+                left: vertical ? '0' : `${size + handleWidth / 2 * (ishidden1 ? 0 : ishidden2 ? -2 : -1)}px`,
                 width: vertical ? '100%' : `${handleWidth}px`,
                 height: vertical ? `${handleWidth}px` : '100%',
-            }"></div>
+            }">
+            <div v-if="!vertical" class="w-1px h-full absolute left-[calc(50%-0.5px)] bg-#444 op-50"></div>
+        </div>
     </div>
 </template>
