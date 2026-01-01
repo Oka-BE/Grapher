@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onMounted, reactive, ref } from 'vue'
+import { markRaw, nextTick, onMounted, reactive, ref } from 'vue'
 import manager from './manager'
 import { exprTypes } from './shared'
 import { Vector2 } from '@/class/class'
@@ -36,12 +36,12 @@ function pushFunc(focus = true) {
     manager.pushExpr(null, color)
     nextTick(() => {
         const obj = manager.exprs[manager.exprs.length - 1]
-        obj.field = MQ.MathField(field.value[manager.exprs.length - 1], {
+        obj.field = markRaw(MQ.MathField(field.value[manager.exprs.length - 1], {
             spaceBehavesLikeTab: true,
             handlers: {
                 edit: function () {
                     const i = manager.exprs.indexOf(obj)
-                    // if (i === -1) return
+                    if (i === -1) return
                     const latex = obj.field.latex()
                     manager.editExpr(i, latex)
                     // if (obj.type !== exprTypes.varDefinition) {
@@ -68,7 +68,7 @@ function pushFunc(focus = true) {
                     if (manager.exprs.indexOf(obj) < manager.exprs.length - 1) manager.exprs[manager.exprs.indexOf(obj) + 1].field.focus()
                 }
             }
-        })
+        }))
         if (focus) obj.field.focus()
     })
 }
@@ -99,6 +99,7 @@ function onDragHandle(e) {
     const v = Math.round((min + (max - min) * rate) * 1e3) / 1e3
     const latex = expr.field.latex()
     expr.field.latex(latex.slice(0, latex.indexOf('=') + 1) + v)
+    console.log(1)
 }
 function onFinishHandle() {
     window.removeEventListener('mousemove', onDragHandle)
@@ -135,16 +136,18 @@ function mousedownCover(expr) {
 </script>
 
 <template>
-    <div class="size-full flex flex-col gap-10 color-#eee overflow-hidden">
-        <div class="px-6">
+    <div class="size-full flex flex-col gap-10 overflow-hidden bg-[light-dark(#ececec,#303031)]">
+        <div class="px-5">
             <h2 class="mt-3 mb-4 select-none">Expression Field</h2>
             <div class="flex flex-col gap-3">
-                <div v-for="(expr, i) in manager.exprs" :key="expr.id" class="bg-#38383a rounded-4px overflow-hidden">
-                    <div class="bg-#3a3a3c grid rounded-4px overflow-hidden shadow-xl relative" :class="{
-                        'grid-cols-[4px_1fr_1em]': manager.exprs.length > 1,
-                        'grid-cols-[4px_1fr]': manager.exprs.length === 1,
-                    }">
-                        <div v-if="expr.type === exprTypes.varDefinition && expr.varDefinition.handle.onAutoSlide"
+                <div v-for="(expr, i) in manager.exprs" :key="expr.id"
+                    class="bg-[light-dark(#e5e5e5,#38383a)] rounded-4px overflow-hidden shadow-2xl">
+                    <div class="bg-[light-dark(#eaeaea,#3a3a3c)] grid rounded-4px overflow-hidden shadow-xl relative"
+                        :class="{
+                            'grid-cols-[4px_1fr_1em]': manager.exprs.length > 1,
+                            'grid-cols-[4px_1fr]': manager.exprs.length === 1,
+                        }">
+                        <div v-if="0 && expr.type === exprTypes.varDefinition && expr.varDefinition.handle.onAutoSlide"
                             class="cursor-text absolute top-0 left-4px right-1em h-full" :class="{
                                 'w-[calc(100%-4px-1em)]': manager.exprs.length > 1,
                                 'w-[calc(100%-4px)]': manager.exprs.length === 1,
@@ -152,7 +155,7 @@ function mousedownCover(expr) {
                         <div :style="{ backgroundColor: expr.color }"></div>
                         <span ref="field" class="px-1.2 py-0.7 font-size-1.2em"></span>
                         <button @click="removefunc(i)" v-if="manager.exprs.length > 1"
-                            class="bg-#3a3a3c color-#666 flex justify-center items-center shadow-transparent border-none hover-filter-brightness-120 hover-cursor-pointer">×</button>
+                            class="bg-[light-dark(#eaeaea,#3a3a3c)] color-[light-dark(#888,#888)] flex justify-center items-center shadow-transparent border-none hover-filter-brightness-120 hover-cursor-pointer transition-filter">×</button>
                     </div>
                     <div v-if="expr.type === exprTypes.varDefinition" class="p-2 select-none">
                         <div v-if="!expr.varDefinition.conflict">
@@ -162,7 +165,8 @@ function mousedownCover(expr) {
                                     class="outline-none bg-transparent border-none text-center"></input>
                                 <div class="flex items-center justify-center">
                                     <div ref="handleTrack" class="w-full h-0 relative">
-                                        <div class="bg-#444 w-full h-1 rounded-full transform-translate-[0,-50%]">
+                                        <div
+                                            class="bg-[light-dark(#eee,#444)] w-full h-1 rounded-full transform-translate-[0,-50%]">
                                         </div>
                                         <div class="size-3 bg-blue rounded-full absolute top-0 transform-translate-[-50%,-50%] hover-bg-lightblue hover:transform-scale-120 transition-[transform,background-color]"
                                             :style="{ left: `${(expr.varDefinition.v - expr.varDefinition.handle.min) / (expr.varDefinition.handle.max - expr.varDefinition.handle.min) * 100}%` }"
@@ -205,7 +209,7 @@ function mousedownCover(expr) {
                         </div>
                     </div>
                 </div>
-                <div class="mt-0.6em bg-#353537 border-solid border-1px border-#404040 shadow w-full h-8 rounded flex justify-center color-#666 line-height-7 cursor-pointer hover:brightness-106 hover:color-#aaa transition-[filter,color] select-none font-size-0.9em"
+                <div class="mt-0.6em bg-[light-dark(#e7e7e7,#353537)] border-solid border-1px border-[light-dark(#ccc,#404040)] shadow w-full h-8 rounded flex justify-center line-height-7 cursor-pointer hover:brightness-103 hover:color-#aaa transition-[filter,color] select-none font-size-0.9em"
                     @click="pushFunc()">
                     create new...
                 </div>
@@ -222,5 +226,10 @@ function mousedownCover(expr) {
 .mq-editable-field.mq-math-mode.mq-focused {
     border-color: transparent !important;
     box-shadow: none !important;
+}
+</style>
+<style>
+.mq-cursor {
+    border-left-color: light-dark(#444, #ddd) !important;
 }
 </style>

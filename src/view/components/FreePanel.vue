@@ -148,7 +148,7 @@ function upHandle() {
                 width: vertical ? '100%' : `${handleWidth}px`,
                 height: vertical ? `${handleWidth}px` : '100%',
             }">
-            <div v-if="!vertical" class="w-1px h-full absolute left-[calc(50%-0.5px)] bg-#444 op-50"></div>
+            <div v-if="!vertical" class="w-1px h-full absolute left-[calc(50%-0.5px)] bg-[light-dark(#888,#444)] op-50"></div>
         </div>
     </div>
 </template>

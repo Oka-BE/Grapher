@@ -8,9 +8,9 @@ const createWindow = () => {
     autoHideMenuBar: true,
   })
 
-  win.loadURL("http://localhost:5173/")
-  // win.loadFile(path.join(__dirname, '../../dist/index.html'))
-  win.webContents.openDevTools()
+  // win.loadURL("http://localhost:5173/")
+  win.loadFile(path.join(__dirname, '../../dist/index.html'))
+  // win.webContents.openDevTools()
 }
 
 app.whenReady().then(() => {

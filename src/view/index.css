@@ -1,6 +1,10 @@
+:root {
+    color-scheme: light dark;
+}
+
 * {
-    caret-color: #ddd;
-    color: #ddd;
+    caret-color: light-dark(#4c4c4c, #ddd);
+    color: light-dark(#4c4c4c, #ddd);
     box-sizing: border-box;
 }
 

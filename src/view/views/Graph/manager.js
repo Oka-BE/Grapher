@@ -111,6 +111,8 @@ class GraphManager {
                     obj.varDefinition.v = info.varDefinition.v
                     obj.varDefinition.handle.min = Math.min(obj.varDefinition.handle.min, info.varDefinition.v)
                     obj.varDefinition.handle.max = Math.max(obj.varDefinition.handle.max, info.varDefinition.v)
+                } else {
+                    obj.varDefinition.handle.onAutoSlide = false
                 }
                 if (info.functionDefinition) {
                     obj.functionDefinition.name = info.functionDefinition.name
@@ -280,9 +282,12 @@ class GraphManager {
         this.redrawCoordinate()
         this.redrawGraphs()
     }
+    isLightMode() {
+        return window.matchMedia('(prefers-color-scheme: light)').matches
+    }
 }
 
-const manager = new GraphManager()
+const manager = reactive(new GraphManager())
 export default manager
 
 let timeSpot = Date.now()
@@ -304,6 +309,11 @@ function stepAutoSlide() {
     requestAnimationFrame(stepAutoSlide)
 }
 stepAutoSlide()
+
+const media = window.matchMedia('(prefers-color-scheme: light)')
+media.addEventListener('change', () => {
+    manager.redrawAll()
+})
 
 
 // let time = new Date().getTime()

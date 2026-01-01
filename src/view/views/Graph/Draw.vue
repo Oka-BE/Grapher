@@ -77,22 +77,22 @@ function redrawCoordinate() {
         cCtx.beginPath()
         cCtx.moveTo(0, Opos.y + i * step)
         cCtx.lineTo(width, Opos.y + i * step)
-        if (i % 5 === 0) cCtx.strokeStyle = '#505050'
-        else cCtx.strokeStyle = '#383838'
+        if (i % 5 === 0) cCtx.strokeStyle = manager.isLightMode() ? '#bbb' : '#505050'
+        else cCtx.strokeStyle = manager.isLightMode() ? '#ccc' : '#383838'
         cCtx.stroke()
     }
     for (let i = Math.ceil(-Opos.x / step); Opos.x + i * step < width; i++) {
         cCtx.beginPath()
         cCtx.moveTo(Opos.x + i * step, 0)
         cCtx.lineTo(Opos.x + i * step, height)
-        if (i % 5 === 0) cCtx.strokeStyle = '#505050'
-        else cCtx.strokeStyle = '#383838'
+        if (i % 5 === 0) cCtx.strokeStyle = manager.isLightMode() ? '#bbb' : '#505050'
+        else cCtx.strokeStyle = manager.isLightMode() ? '#ccc' : '#383838'
         cCtx.stroke()
     }
 
     // number
     cCtx.font = '12px Arial'
-    cCtx.fillStyle = '#aaa'
+    cCtx.fillStyle = manager.isLightMode() ? '#333' : '#aaa'
     cCtx.textBaseline = 'middle'
     cCtx.textAlign = 'left'
     for (let i = Math.ceil(-Opos.y / step); Opos.y + i * step < height; i++) {
@@ -130,7 +130,7 @@ function redrawCoordinate() {
     cCtx.moveTo(Opos.x - 5, 10)
     cCtx.lineTo(Opos.x, 0)
     cCtx.lineTo(Opos.x + 5, 10)
-    cCtx.strokeStyle = '#aaa'
+    cCtx.strokeStyle = manager.isLightMode() ? '#333' : '#aaa'
     cCtx.stroke()
 
     coordinateAFI = -1

@@ -43,7 +43,7 @@ export const Tokenizer = {
             let tok
             for (const token of this.tokens) {
                 const match = rest.match(token.regex)
-                if (match && match[0].length >= len) {
+                if (match && match[0].length > len) {
                     len = match[0].length
                     tok = { type: token.type, value: match[0] }
                 }
@@ -162,9 +162,6 @@ export class Equation {
         let sign
         if (typeof y !== 'number' || isNaN(y)) {
             sign = null
-        } else if (y === 0) {
-            roots.push(min)
-            sign = 0
         } else {
             sign = y < 0 ? -1 : 1
         }
@@ -176,13 +173,7 @@ export class Equation {
                 continue
             }
             if (sign !== null) {
-                if (sign * y === 0) {
-                    if (y === 0) {
-                        roots.push(v)
-                        // console.log('found root in 0 posibility:', v)
-                    }
-                    sign = y < 0 ? -1 : y > 0 ? 1 : 0
-                } else if (sign * y < 0) {
+                if (sign * y < 0) {
                     let left = v - granularity, right = v
                     this.lhs.compiledList[varName] = left
                     const oLeftValue = this.lhs.computeCompiled()
@@ -256,7 +247,7 @@ export class Equation {
 export class VariableDefinition {
     static parse(arg) {
         const tokens = Array.isArray(arg) ? arg : Tokenizer.tokenize(arg)
-        if (tokens !== null && tokens[0].type === 'CHAR' && tokens[1].value === '=') {
+        if (tokens !== null && tokens[0].type === 'CHAR' && tokens[0].value !== 'x' && tokens[0].value !== 'y' && tokens[1].value === '=') {
             const num = Num.parse(tokens.slice(2))
             if (num) {
                 return new VariableDefinition(tokens[0].value, num.v)
@@ -400,13 +391,14 @@ export class Expression {
                 braceCount--
             }
             if ((tokens[i].value === '+' || tokens[i].value === '-') && braceCount === 0 && i > 0) {
+                console.log(tokens.slice(lastSplit, i))
                 const item = Item.parse(tokens.slice(lastSplit, i))
                 if (item === null) {
                     return null
                 }
                 items.push(item)
                 lastSplit = i
-                i++
+                // i++
             }
         }
         return new Expression(items)
@@ -558,8 +550,6 @@ export class Item {
                 for (let k = 0; k < parser.length; k++) {
                     const res = parser[k](subtokens)
                     if (res !== null) {
-                        // console.log(parser[k])
-                        // console.log(JSON.stringify(subtokens, null, 2))
                         part.push(res)
                         found = true
                         i = j
@@ -669,12 +659,10 @@ export class Item {
                 }
                 const expr = def.expr.clone()
                 const params = {}
-                // console.log(JSON.stringify(this.part[i].params, null, 2))
                 for (let i = 0; i < def.params.length; i++) {
                     params[def.params[i]] = new Bracket(this.part[i].params[i])
                 }
                 expr.substitute(params)
-                // console.log(expr)
                 expr.replaceFunction(funcDefs)
                 this.part[i] = new Bracket(expr)
             } else if (this.part[i].replaceFunction) {
@@ -1599,7 +1587,7 @@ export class Variable {
 
 export class Num {
     static map = {
-        pi: 3.1415926535897932384,
+        π: 3.1415926535897932384,
         e: 2.718281828459045,
     }
     static parse(tokens) {

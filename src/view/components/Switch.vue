@@ -12,13 +12,13 @@ const props = defineProps({
         default: 1.2
     },
     backgroundColor: {
-        default: '#424242'
+        default: 'light-dark(#ddd,#424242)'
     },
     handleOffColor: {
-        default: '#242424'
+        default: 'light-dark(#ccc,#242424)'
     },
     handleOnColor: {
-        default: '#0088d6'
+        default: 'light-dark(#0088d6,#0088d6)'
     },
     transitionDuration: {
         default: 200,
